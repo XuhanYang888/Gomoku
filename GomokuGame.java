@@ -5,30 +5,39 @@ import javax.imageio.ImageIO;
 import javax.sound.sampled.*;
 
 public class GomokuGame {
+    // board setup stuff
     private static final int ROWS = 15;
     private static final int COLS = 15;
     private static final int CELL_SIZE = 40;
     private static final int OFFSET_X = 100;
     private static final int OFFSET_Y = 50;
 
+    // gui components
     private JFrame frame;
     private CardLayout screenManager;
     private JPanel mainPanel;
     private GraphicsPanel gamePanel;
 
+    // game state tracking
     private int[][] board = new int[ROWS][COLS];
     private boolean blackTurn = true;
     private boolean gameOver = false;
+    private boolean vsBot = false;
 
+    // visual and audio assets
     private Image blackStone;
     private Image whiteStone;
     private Clip blackSound, whiteSound, winSound;
 
+    // timer related stuff
     private static final int TURN_TIME_SECONDS = 60;
     private Timer turnTimer;
     private int timeLeft;
     private JLabel timerLabel;
     private JLabel winLabel;
+
+    // ai opponent
+    private GomokuBot bot;
 
     public static void main(String[] args) throws Exception {
         SwingUtilities.invokeLater(() -> {
@@ -43,18 +52,20 @@ public class GomokuGame {
     public void start() throws Exception {
         loadResources();
         setupUI();
+        bot = new GomokuBot();
     }
 
+    // load images and sounds
     private void loadResources() throws Exception {
         ClassLoader loader = getClass().getClassLoader();
-        blackStone = ImageIO.read(loader.getResource("black.png"));
-        whiteStone = ImageIO.read(loader.getResource("white.png"));
-
-        blackSound = loadSound(loader.getResource("black.wav"));
-        whiteSound = loadSound(loader.getResource("white.wav"));
-        winSound = loadSound(loader.getResource("win.wav"));
+        blackStone = ImageIO.read(loader.getResource("assets/black.png"));
+        whiteStone = ImageIO.read(loader.getResource("assets/white.png"));
+        blackSound = loadSound(loader.getResource("assets/black.wav"));
+        whiteSound = loadSound(loader.getResource("assets/white.wav"));
+        winSound = loadSound(loader.getResource("assets/win.wav"));
     }
 
+    // helper for loading audio clips
     private Clip loadSound(java.net.URL resource) throws Exception {
         if (resource == null) return null;
         AudioInputStream stream = AudioSystem.getAudioInputStream(resource);
@@ -63,6 +74,7 @@ public class GomokuGame {
         return clip;
     }
 
+    // build the entire interface
     private void setupUI() {
         frame = new JFrame("Gomoku Game");
         frame.setSize(800, 700);
@@ -71,25 +83,41 @@ public class GomokuGame {
         screenManager = new CardLayout();
         mainPanel = new JPanel(screenManager);
 
+        // start screen with buttons
         JPanel startPanel = new JPanel(new BorderLayout());
-        JButton startButton = new JButton("Start Game");
-        startButton.setFont(new Font("Arial", Font.BOLD, 36));
-        startButton.addActionListener(e -> {
-            screenManager.show(mainPanel, "game");
-            startTurnTimer(); // Start timer when game starts
-        });
-        startPanel.add(startButton, BorderLayout.CENTER);
+        JPanel buttonPanel = new JPanel();
+        buttonPanel.setLayout(new FlowLayout(FlowLayout.CENTER, 40, 40));
 
-        // Timer label setup
+        JButton localButton = new JButton("Local 1v1");
+        localButton.setFont(new Font("Arial", Font.BOLD, 36));
+        localButton.addActionListener(e -> {
+            vsBot = false;
+            screenManager.show(mainPanel, "game");
+            startTurnTimer();
+        });
+
+        JButton botButton = new JButton("vs Computer");
+        botButton.setFont(new Font("Arial", Font.BOLD, 36));
+        botButton.addActionListener(e -> {
+            vsBot = true;
+            screenManager.show(mainPanel, "game");
+            startTurnTimer();
+        });
+
+        buttonPanel.add(localButton);
+        buttonPanel.add(botButton);
+        startPanel.add(buttonPanel, BorderLayout.CENTER);
+
+        // labels for timer and winner
         timerLabel = new JLabel("Time left: 60", SwingConstants.CENTER);
         timerLabel.setFont(new Font("Arial", Font.BOLD, 24));
         timerLabel.setForeground(Color.BLUE);
 
-        // Win label setup
         winLabel = new JLabel("", SwingConstants.CENTER);
         winLabel.setFont(new Font("Arial", Font.BOLD, 28));
         winLabel.setForeground(Color.RED);
 
+        // game screen layout
         JPanel gameContainer = new JPanel(new BorderLayout());
         gamePanel = new GraphicsPanel();
         gamePanel.addMouseListener(new MouseAdapter() {
@@ -109,30 +137,67 @@ public class GomokuGame {
         frame.setVisible(true);
     }
 
+    // handle player clicking board
     private void handleMouseClick(int x, int y) {
         if (gameOver) return;
+        if (vsBot && !blackTurn) return;
 
+        // convert pixel coords to grid
         int row = (y - OFFSET_Y + CELL_SIZE / 2) / CELL_SIZE;
         int col = (x - OFFSET_X + CELL_SIZE / 2) / CELL_SIZE;
 
         if (row >= 0 && row < ROWS && col >= 0 && col < COLS && board[row][col] == 0) {
             board[row][col] = blackTurn ? 1 : 2;
             playMoveSound();
-            gamePanel.repaint(); // Ensure the stone is drawn immediately
+            gamePanel.repaint();
 
             if (checkWin(row, col)) {
                 gameOver = true;
                 stopTurnTimer();
-                String winner = blackTurn ? "Black" : "White";
+                String winner = blackTurn ? (vsBot ? "You" : "Black") : (vsBot ? "Computer" : "White");
                 showWinAndExit(winner + " wins!");
             } else {
                 blackTurn = !blackTurn;
-                startTurnTimer(); // Reset timer for next player
+                if (vsBot && !blackTurn && !gameOver) {
+                    startTurnTimer();
+                    botMove();
+                } else {
+                    startTurnTimer();
+                }
             }
         }
     }
 
-    // Timer logic
+    // computer makes its move
+    private void botMove() {
+        if (gameOver) return;
+        
+        String originalText = winLabel.getText();
+        winLabel.setText("Computer is computing...");
+        gamePanel.repaint();
+        
+        // add small delay for drama
+        Timer botDelay = new Timer(800, evt -> {
+            int[] move = bot.findBestMove(board);
+            board[move[0]][move[1]] = 2;
+            playMoveSound();
+            winLabel.setText(originalText);
+            gamePanel.repaint();
+            
+            if (checkWin(move[0], move[1])) {
+                gameOver = true;
+                stopTurnTimer();
+                showWinAndExit("Computer wins!");
+            } else {
+                blackTurn = !blackTurn;
+                startTurnTimer();
+            }
+        });
+        botDelay.setRepeats(false);
+        botDelay.start();
+    }
+
+    // begin countdown for turn
     private void startTurnTimer() {
         stopTurnTimer();
         timeLeft = TURN_TIME_SECONDS;
@@ -143,14 +208,15 @@ public class GomokuGame {
             if (timeLeft <= 0) {
                 stopTurnTimer();
                 gameOver = true;
-                String loser = blackTurn ? "Black" : "White";
-                String winner = blackTurn ? "White" : "Black";
+                String loser = blackTurn ? (vsBot ? "You" : "Black") : (vsBot ? "Computer" : "White");
+                String winner = blackTurn ? (vsBot ? "Computer" : "White") : (vsBot ? "You" : "Black");
                 showWinAndExit(loser + " ran out of time! " + winner + " wins!");
             }
         });
         turnTimer.start();
     }
 
+    // stop the countdown
     private void stopTurnTimer() {
         if (turnTimer != null) {
             turnTimer.stop();
@@ -158,11 +224,13 @@ public class GomokuGame {
         }
     }
 
+    // refresh timer display text
     private void updateTimerLabel() {
-        String player = blackTurn ? "Black" : "White";
-        timerLabel.setText(player + "'s turn - Time left: " + timeLeft + "s");
+        String player = blackTurn ? (vsBot ? "Your" : "Black") : (vsBot ? "Computer's" : "White");
+        timerLabel.setText(player + " turn - Time left: " + timeLeft + "s");
     }
 
+    // play stone placement sound
     private void playMoveSound() {
         Clip sound = blackTurn ? blackSound : whiteSound;
         if (sound != null) {
@@ -171,7 +239,7 @@ public class GomokuGame {
         }
     }
 
-    // Unified win handling for both win types, using JLabel instead of popup
+    // display winner and quit
     private void showWinAndExit(String message) {
         playWinSound();
         winLabel.setText(message);
@@ -180,6 +248,7 @@ public class GomokuGame {
         new Timer(delay, evt -> System.exit(0)).start();
     }
 
+    // play victory sound effect
     private void playWinSound() {
         if (winSound != null) {
             winSound.setFramePosition(0);
@@ -187,6 +256,7 @@ public class GomokuGame {
         }
     }
 
+    // check if last move won
     private boolean checkWin(int row, int col) {
         int player = board[row][col];
         int[][] directions = {{0,1},{1,0},{1,1},{1,-1}};
@@ -207,20 +277,23 @@ public class GomokuGame {
         return false;
     }
 
-    // Custom JPanel for rendering the game board and pieces
+    // custom panel for drawing board
     class GraphicsPanel extends JPanel {
         protected void paintComponent(Graphics g) {
             super.paintComponent(g);
 
+            // tan board background
             g.setColor(new Color(210, 180, 140));
             g.fillRect(0, 0, getWidth(), getHeight());
 
+            // draw grid lines
             g.setColor(Color.BLACK);
             for (int i = 0; i < ROWS; i++)
                 g.drawLine(OFFSET_X, OFFSET_Y + i * CELL_SIZE, OFFSET_X + (COLS - 1) * CELL_SIZE, OFFSET_Y + i * CELL_SIZE);
             for (int j = 0; j < COLS; j++)
                 g.drawLine(OFFSET_X + j * CELL_SIZE, OFFSET_Y, OFFSET_X + j * CELL_SIZE, OFFSET_Y + (ROWS - 1) * CELL_SIZE);
 
+            // draw all placed stones
             for (int row = 0; row < ROWS; row++) {
                 for (int col = 0; col < COLS; col++) {
                     int x = OFFSET_X + col * CELL_SIZE - CELL_SIZE / 2 + 1;
