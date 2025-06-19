@@ -24,6 +24,12 @@ public class GomokuGame {
     private Image whiteStone;
     private Clip blackSound, whiteSound, winSound;
 
+    private static final int TURN_TIME_SECONDS = 60;
+    private Timer turnTimer;
+    private int timeLeft;
+    private JLabel timerLabel;
+    private JLabel winLabel;
+
     public static void main(String[] args) throws Exception {
         SwingUtilities.invokeLater(() -> {
             try {
@@ -68,18 +74,35 @@ public class GomokuGame {
         JPanel startPanel = new JPanel(new BorderLayout());
         JButton startButton = new JButton("Start Game");
         startButton.setFont(new Font("Arial", Font.BOLD, 36));
-        startButton.addActionListener(e -> screenManager.show(mainPanel, "game"));
+        startButton.addActionListener(e -> {
+            screenManager.show(mainPanel, "game");
+            startTurnTimer(); // Start timer when game starts
+        });
         startPanel.add(startButton, BorderLayout.CENTER);
 
+        // Timer label setup
+        timerLabel = new JLabel("Time left: 60", SwingConstants.CENTER);
+        timerLabel.setFont(new Font("Arial", Font.BOLD, 24));
+        timerLabel.setForeground(Color.BLUE);
+
+        // Win label setup
+        winLabel = new JLabel("", SwingConstants.CENTER);
+        winLabel.setFont(new Font("Arial", Font.BOLD, 28));
+        winLabel.setForeground(Color.RED);
+
+        JPanel gameContainer = new JPanel(new BorderLayout());
         gamePanel = new GraphicsPanel();
         gamePanel.addMouseListener(new MouseAdapter() {
             public void mousePressed(MouseEvent e) {
                 handleMouseClick(e.getX(), e.getY());
             }
         });
+        gameContainer.add(timerLabel, BorderLayout.NORTH);
+        gameContainer.add(gamePanel, BorderLayout.CENTER);
+        gameContainer.add(winLabel, BorderLayout.SOUTH);
 
         mainPanel.add(startPanel, "start");
-        mainPanel.add(gamePanel, "game");
+        mainPanel.add(gameContainer, "game");
 
         frame.setContentPane(mainPanel);
         screenManager.show(mainPanel, "start");
@@ -95,14 +118,49 @@ public class GomokuGame {
         if (row >= 0 && row < ROWS && col >= 0 && col < COLS && board[row][col] == 0) {
             board[row][col] = blackTurn ? 1 : 2;
             playMoveSound();
+            gamePanel.repaint(); // Ensure the stone is drawn immediately
 
             if (checkWin(row, col)) {
                 gameOver = true;
-                playWinSoundAndExit();
+                stopTurnTimer();
+                String winner = blackTurn ? "Black" : "White";
+                showWinAndExit(winner + " wins!");
+            } else {
+                blackTurn = !blackTurn;
+                startTurnTimer(); // Reset timer for next player
             }
-            blackTurn = !blackTurn;
-            gamePanel.repaint();
         }
+    }
+
+    // Timer logic
+    private void startTurnTimer() {
+        stopTurnTimer();
+        timeLeft = TURN_TIME_SECONDS;
+        updateTimerLabel();
+        turnTimer = new Timer(1000, e -> {
+            timeLeft--;
+            updateTimerLabel();
+            if (timeLeft <= 0) {
+                stopTurnTimer();
+                gameOver = true;
+                String loser = blackTurn ? "Black" : "White";
+                String winner = blackTurn ? "White" : "Black";
+                showWinAndExit(loser + " ran out of time! " + winner + " wins!");
+            }
+        });
+        turnTimer.start();
+    }
+
+    private void stopTurnTimer() {
+        if (turnTimer != null) {
+            turnTimer.stop();
+            turnTimer = null;
+        }
+    }
+
+    private void updateTimerLabel() {
+        String player = blackTurn ? "Black" : "White";
+        timerLabel.setText(player + "'s turn - Time left: " + timeLeft + "s");
     }
 
     private void playMoveSound() {
@@ -113,12 +171,19 @@ public class GomokuGame {
         }
     }
 
-    private void playWinSoundAndExit() {
+    // Unified win handling for both win types, using JLabel instead of popup
+    private void showWinAndExit(String message) {
+        playWinSound();
+        winLabel.setText(message);
+        gamePanel.repaint();
+        int delay = winSound != null ? (int) (winSound.getMicrosecondLength() / 1000) : 2000;
+        new Timer(delay, evt -> System.exit(0)).start();
+    }
+
+    private void playWinSound() {
         if (winSound != null) {
             winSound.setFramePosition(0);
             winSound.start();
-            int delay = (int) (winSound.getMicrosecondLength() / 1000);
-            new Timer(delay, evt -> System.exit(0)).start();
         }
     }
 
@@ -165,12 +230,6 @@ public class GomokuGame {
                     else if (board[row][col] == 2 && whiteStone != null)
                         g.drawImage(whiteStone, x, y, CELL_SIZE - 2, CELL_SIZE - 2, this);
                 }
-            }
-
-            if (gameOver) {
-                g.setColor(Color.RED);
-                g.setFont(new Font("Arial", Font.BOLD, 30));
-                g.drawString((blackTurn ? "White" : "Black") + " Wins!", 350, 30);
             }
         }
     }
