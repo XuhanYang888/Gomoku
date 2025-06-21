@@ -17,6 +17,7 @@ public class GomokuGame {
     private CardLayout screenManager;
     private JPanel mainPanel;
     private GraphicsPanel gamePanel;
+    private JButton backButton;
 
     // game state tracking
     private int[][] board = new int[ROWS][COLS];
@@ -25,6 +26,7 @@ public class GomokuGame {
     private boolean vsBot = false;
 
     // visual and audio assets
+    private Image backgroundImage;
     private Image blackStone;
     private Image whiteStone;
     private Clip blackSound, whiteSound, winSound;
@@ -58,6 +60,7 @@ public class GomokuGame {
     // load images and sounds
     private void loadResources() throws Exception {
         ClassLoader loader = getClass().getClassLoader();
+        backgroundImage = ImageIO.read(loader.getResource("assets/background.png"));
         blackStone = ImageIO.read(loader.getResource("assets/black.png"));
         whiteStone = ImageIO.read(loader.getResource("assets/white.png"));
         blackSound = loadSound(loader.getResource("assets/black.wav"));
@@ -77,29 +80,47 @@ public class GomokuGame {
     // build the entire interface
     private void setupUI() {
         frame = new JFrame("Gomoku Game");
-        frame.setSize(800, 700);
+        frame.setSize(800, 800);
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 
         screenManager = new CardLayout();
         mainPanel = new JPanel(screenManager);
 
         // start screen with buttons
-        JPanel startPanel = new JPanel(new BorderLayout());
+        JPanel startPanel = new JPanel(new BorderLayout()) {
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                g.setColor(new Color(210, 180, 140));
+                g.fillRect(0, 0, getWidth(), getHeight());
+                if (backgroundImage != null) {
+                    g.drawImage(backgroundImage, 17, 50, 765, 669, this);
+                }
+            }
+        };
+        startPanel.setOpaque(false);
+
+        JLabel titleLabel = new JLabel("Gomoku", SwingConstants.CENTER);
+        titleLabel.setFont(new Font("Futura", Font.PLAIN, 48));
+        startPanel.add(titleLabel, BorderLayout.NORTH);
+
         JPanel buttonPanel = new JPanel();
         buttonPanel.setLayout(new FlowLayout(FlowLayout.CENTER, 40, 40));
+        buttonPanel.setOpaque(false);
 
         JButton localButton = new JButton("Local 1v1");
-        localButton.setFont(new Font("Arial", Font.BOLD, 36));
+        localButton.setFont(new Font("Futura", Font.PLAIN, 36));
         localButton.addActionListener(e -> {
             vsBot = false;
+            resetGame();
             screenManager.show(mainPanel, "game");
             startTurnTimer();
         });
 
         JButton botButton = new JButton("vs Computer");
-        botButton.setFont(new Font("Arial", Font.BOLD, 36));
+        botButton.setFont(new Font("Futura", Font.PLAIN, 36));
         botButton.addActionListener(e -> {
             vsBot = true;
+            resetGame();
             screenManager.show(mainPanel, "game");
             startTurnTimer();
         });
@@ -110,12 +131,24 @@ public class GomokuGame {
 
         // labels for timer and winner
         timerLabel = new JLabel("Time left: 60", SwingConstants.CENTER);
-        timerLabel.setFont(new Font("Arial", Font.BOLD, 24));
-        timerLabel.setForeground(Color.BLUE);
+        timerLabel.setFont(new Font("Futura", Font.PLAIN, 24));
+        timerLabel.setForeground(Color.BLACK);
+        timerLabel.setOpaque(true);
+        timerLabel.setBackground(new Color(240,240,240));
 
         winLabel = new JLabel("", SwingConstants.CENTER);
-        winLabel.setFont(new Font("Arial", Font.BOLD, 28));
-        winLabel.setForeground(Color.RED);
+        winLabel.setFont(new Font("Futura", Font.PLAIN, 24));
+        winLabel.setForeground(Color.BLACK);
+        winLabel.setOpaque(true);
+        winLabel.setBackground(new Color(240,240,240));
+
+        // --- Add Back button ---
+        backButton = new JButton("Back");
+        backButton.setFont(new Font("Futura", Font.PLAIN, 16));
+        backButton.addActionListener(e -> {
+            stopTurnTimer();
+            screenManager.show(mainPanel, "start");
+        });
 
         // game screen layout
         JPanel gameContainer = new JPanel(new BorderLayout());
@@ -125,7 +158,13 @@ public class GomokuGame {
                 handleMouseClick(e.getX(), e.getY());
             }
         });
-        gameContainer.add(timerLabel, BorderLayout.NORTH);
+
+        JPanel topPanel = new JPanel(new BorderLayout());
+        topPanel.add(backButton, BorderLayout.WEST);
+        topPanel.add(timerLabel, BorderLayout.EAST);
+        topPanel.setOpaque(false);
+
+        gameContainer.add(topPanel, BorderLayout.NORTH);
         gameContainer.add(gamePanel, BorderLayout.CENTER);
         gameContainer.add(winLabel, BorderLayout.SOUTH);
 
@@ -159,7 +198,7 @@ public class GomokuGame {
             } else {
                 blackTurn = !blackTurn;
                 if (vsBot && !blackTurn && !gameOver) {
-                    startTurnTimer();
+                    stopTurnTimer();
                     botMove();
                 } else {
                     startTurnTimer();
@@ -171,11 +210,11 @@ public class GomokuGame {
     // computer makes its move
     private void botMove() {
         if (gameOver) return;
-        
+
         String originalText = winLabel.getText();
         winLabel.setText("Computer is computing...");
         gamePanel.repaint();
-        
+
         // add small delay for drama
         Timer botDelay = new Timer(800, evt -> {
             int[] move = bot.findBestMove(board);
@@ -183,7 +222,7 @@ public class GomokuGame {
             playMoveSound();
             winLabel.setText(originalText);
             gamePanel.repaint();
-            
+
             if (checkWin(move[0], move[1])) {
                 gameOver = true;
                 stopTurnTimer();
@@ -227,7 +266,7 @@ public class GomokuGame {
     // refresh timer display text
     private void updateTimerLabel() {
         String player = blackTurn ? (vsBot ? "Your" : "Black") : (vsBot ? "Computer's" : "White");
-        timerLabel.setText(player + " turn - Time left: " + timeLeft + "s");
+        timerLabel.setText(player + " turn - " + timeLeft + "s  ");
     }
 
     // play stone placement sound
@@ -239,13 +278,12 @@ public class GomokuGame {
         }
     }
 
-    // display winner and quit
+    // display winner (no auto quit)
     private void showWinAndExit(String message) {
         playWinSound();
         winLabel.setText(message);
         gamePanel.repaint();
-        int delay = winSound != null ? (int) (winSound.getMicrosecondLength() / 1000) : 2000;
-        new Timer(delay, evt -> System.exit(0)).start();
+        // No auto quit
     }
 
     // play victory sound effect
@@ -275,6 +313,17 @@ public class GomokuGame {
             if (count >= 5) return true;
         }
         return false;
+    }
+
+    // reset the game state
+    private void resetGame() {
+        for (int i = 0; i < ROWS; i++)
+            for (int j = 0; j < COLS; j++)
+                board[i][j] = 0;
+        blackTurn = true;
+        gameOver = false;
+        winLabel.setText("");
+        gamePanel.repaint();
     }
 
     // custom panel for drawing board
